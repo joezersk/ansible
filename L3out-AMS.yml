@@ -1,0 +1,116 @@
+---
+- name: Push a basic OSPF L3Out in SITE-AMS
+  hosts: apic
+  connection: local
+  gather_facts: False
+
+  vars:
+    aci_login: &aci_login
+      hostname: '{{ apic_host }}'
+      username: '{{ apic_username }}'
+      password: '{{ apic_password }}'
+      #      private_key: '{{ apic_private_key }}'
+      use_proxy: '{{ apic_use_proxy }}'
+      validate_certs: '{{ apic_validate_certs }}'
+
+  vars_prompt:
+    - name: "tenant"
+      prompt: "Which tenant do we want this L3Out to live?"
+      private: no
+
+  tasks:
+    - name: Let's make an L3 Domain object first
+      aci_domain:
+        <<: *aci_login
+        domain: ASA_WEST_DOM
+        domain_type: l3dom
+        state: present
+
+    - name: Let's make an AEP just for this ASA L3Domain
+      aci_aep:
+        <<: *aci_login
+        aep: ASA_AEP
+        description: AEP made by Ansible for ASA L3-Out
+        state: present
+
+    - name: Let's bind that L3-Domain to an AAEP
+      aci_aep_to_domain: &binding_present
+        <<: *aci_login
+        aep: ASA_AEP
+        domain: ASA_WEST_DOM
+        domain_type: l3dom
+        state: present
+
+    - name: Let's make sure that tenant exists
+      aci_tenant:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        descr: "Tenant created by Ansible for Video"
+      tags: tenant, vrf, bd, filter, contract, app, epg
+
+    - name: Create an L3Out Object
+      aci_l3out:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        name: ASA_INET_WEST
+        domain: ASA_WEST_DOM
+        vrf: V1
+        l3protocol: ospf
+        route_control: export
+      tags: l3out, ospf
+
+    - name: Push L3Out config to object
+      aci_rest:
+        <<: *aci_login
+        method: post
+        path: /api/mo/uni.xml
+        content: '<polUni rn="uni">
+<fvTenant name="{{ tenant }}" rn="tn-{{ tenant }}">
+<ospfIfPol
+name="ASA_OSPF_POL"
+rn="ospfIfPol-ASA_OSPF_POL"
+pfxSuppress="inherit" prio="1"
+ctrl="advert-subnet,mtu-ignore"
+helloIntvl="10" xmitDelay="1" cost="unspecified" userdom=":all:" deadIntvl="40"
+nwT="p2p" rexmitIntvl="5"
+></ospfIfPol>
+<l3extOut name="ASA_INET_WEST" rn="out-ASA_INET_WEST" targetDscp="unspecified" enforceRtctrl="export">
+<ospfExtP rn="ospfExtP" areaCtrl="redistribute,summary" areaId="backbone" areaType="regular" multipodInternal="no" areaCost="1">
+</ospfExtP>
+<l3extRsL3DomAtt rn="rsl3DomAtt" tDn="uni/l3dom-ASA_WEST_DOM">
+</l3extRsL3DomAtt>
+<l3extRsEctx rn="rsectx" tnFvCtxName="V1">
+</l3extRsEctx>
+<l3extLNodeP name="ASA_INET_WEST_nodeProfile" rn="lnodep-ASA_INET_WEST_nodeProfile" targetDscp="unspecified" tag="yellow-green">
+<l3extRsNodeL3OutAtt tDn="topology/pod-1/node-103" rn="rsnodeL3OutAtt-[topology/pod-1/node-103]" rtrId="51.1.1.1" rtrIdLoopBack="yes">
+</l3extRsNodeL3OutAtt>
+<l3extLIfP name="ASA_INET_WEST_interfaceProfile" rn="lifp-ASA_INET_WEST_interfaceProfile" tag="yellow-green" prio="unspecified">
+<ospfIfP rn="ospfIfP" authType="none" authKeyId="1">
+<ospfRsIfPol rn="rsIfPol" tnOspfIfPolName="ASA_OSPF_POL">
+</ospfRsIfPol>
+</ospfIfP>
+<l3extRsPathL3OutAtt tDn="topology/pod-1/paths-103/pathep-[eth1/19]" rn="rspathL3OutAtt-[topology/pod-1/paths-103/pathep-[eth1/19]]" ipv6Dad="enabled" addr="5.5.1.2/24" targetDscp="unspecified" encapScope="local" llAddr="::" autostate="disabled" mac="00:22:BD:F8:19:FF" mode="regular" encap="unknown" ifInstT="l3-port" mtu="inherit">
+</l3extRsPathL3OutAtt>
+<l3extRsNdIfPol rn="rsNdIfPol">
+</l3extRsNdIfPol>
+<l3extRsLIfPCustQosPol rn="rslIfPCustQosPol">
+</l3extRsLIfPCustQosPol>
+<l3extRsIngressQosDppPol rn="rsingressQosDppPol">
+</l3extRsIngressQosDppPol>
+<l3extRsEgressQosDppPol rn="rsegressQosDppPol">
+</l3extRsEgressQosDppPol>
+<l3extRsArpIfPol rn="rsArpIfPol">
+</l3extRsArpIfPol>
+</l3extLIfP>
+</l3extLNodeP>
+<l3extInstP name="INET_WEST" rn="instP-INET_WEST" matchT="AtleastOne" targetDscp="unspecified" prefGrMemb="exclude" floodOnEncap="disabled" prio="unspecified">
+<l3extSubnet ip="0.0.0.0/0" rn="extsubnet-[0.0.0.0/0]" scope="import-security">
+</l3extSubnet>
+<fvRsCustQosPol rn="rscustQosPol">
+</fvRsCustQosPol>
+</l3extInstP>
+</l3extOut>
+</fvTenant>
+</polUni>'

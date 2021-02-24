@@ -1,0 +1,186 @@
+---
+- name: Push a basic tenant with stuff for video
+  hosts: apic
+  connection: local
+  gather_facts: False
+
+  vars:
+    aci_login: &aci_login
+      hostname: '{{ apic_host }}'
+      username: '{{ apic_username }}'
+      password: '{{ apic_password }}'
+      #      private_key: '{{ apic_private_key }}'
+      use_proxy: '{{ apic_use_proxy }}'
+      validate_certs: '{{ apic_validate_certs }}'
+
+  vars_prompt:
+    - name: "tenant"
+      prompt: "What would you like to name your Tenant?"
+      private: no
+
+  tasks:
+    - name: Let's make that tenant
+      aci_tenant:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        descr: "Tenant created by Ansible for Video"
+      tags: tenant, vrf, bd, filter, contract, app, epg
+
+    - name: Make a VRF or this tenant
+      aci_vrf:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        vrf: V1
+      tags: vrf, bd
+
+    - name: Create/modify L3 Bridge Domains
+      aci_bd:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        bd: BD-A
+        vrf: V1
+      tags: bd
+
+    - name: Create subnets for L3 Bridge Domains
+      aci_bd_subnet:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        bd: BD-A
+        gateway: 192.168.1.1
+        mask: 24
+        scope: public
+
+    - name: Create/modify filters
+      aci_filter:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        filter: BASIC_FILTERS
+        descr: "Filter Created Using Ansible"
+      tags: filter, contract
+
+    - name: Add ICMP entry to the filter
+      aci_filter_entry:
+        <<: *aci_login
+        tenant: "{{ tenant }}"
+        filter: BASIC_FILTERS
+        entry: ICMP
+        ether_type: "ip"
+        ip_protocol: icmp
+      tags: filter, contract
+
+    - name: Add HTTP entry to the filter
+      aci_filter_entry:
+        <<: *aci_login
+        tenant: "{{ tenant }}"
+        filter: BASIC_FILTERS
+        entry: HTTP
+        ether_type: "ip"
+        ip_protocol: tcp
+        dst_port: "80"
+      tags: filter, contract
+
+    - name: Add HTTPS entry to the filter
+      aci_filter_entry:
+        <<: *aci_login
+        tenant: "{{ tenant }}"
+        filter: BASIC_FILTERS
+        entry: HTTPS
+        ether_type: "ip"
+        ip_protocol: tcp
+        dst_port: "443"
+      tags: filter, contract
+
+    - name: Add DNS entry to the filter
+      aci_filter_entry:
+        <<: *aci_login
+        tenant: "{{ tenant }}"
+        filter: BASIC_FILTERS
+        entry: DNS
+        ether_type: "ip"
+        ip_protocol: udp
+        dst_port: "53"
+      tags: filter, contract
+
+    - name: Create/modify contracts
+      aci_contract:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        contract: CON1
+        scope: "context"
+      tags: contract
+
+    - name: Add subjects to the contract
+      aci_contract_subject:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        contract: CON1
+        subject: S1
+      tags: contract
+
+    - name: Add filters to these subjects
+      aci_contract_subject_to_filter:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        contract: CON1
+        subject: S1
+        filter: BASIC_FILTERS
+      tags: contract
+
+    - name: Make an ANP
+      aci_ap:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        ap: AN1
+      tags: ANP, EPG
+
+    - name: Create EPG SILVER
+      aci_epg:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        ap: AN1
+        epg: SILVER
+        bd: BD-A
+      tags: EPG
+
+    - name: Create EPG GOLD
+      aci_epg:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        ap: AN1
+        epg: GOLD
+        bd: BD-A
+      tags: EPG
+
+    - name: Apply Contract to Silver as Consumer
+      aci_epg_to_contract:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        ap: AN1
+        epg: SILVER
+        contract: CON1
+        contract_type: consumer
+      tags: EPG, Contract
+
+
+    - name: Apply Contract to Gold as Provider
+      aci_epg_to_contract:
+        <<: *aci_login
+        state: "present"
+        tenant: "{{ tenant }}"
+        ap: AN1
+        epg: GOLD
+        contract: CON1
+        contract_type: provider
+      tags: EPG, Contract
